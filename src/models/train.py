@@ -659,9 +659,16 @@ def main(
     # ------------------------------------------------------------------
     # 6. Training arguments
     # ------------------------------------------------------------------
+    import dataclasses
     import inspect
-    sig = inspect.signature(TrainingArguments.__init__).parameters
-    eval_strategy_key = "eval_strategy" if "eval_strategy" in sig else "evaluation_strategy"
+
+    # Inspect valid fields of TrainingArguments across transformers versions (v4 vs v5)
+    if dataclasses.is_dataclass(TrainingArguments):
+        valid_fields = {f.name for f in dataclasses.fields(TrainingArguments)}
+    else:
+        valid_fields = set(inspect.signature(TrainingArguments.__init__).parameters.keys())
+
+    eval_strategy_key = "eval_strategy" if "eval_strategy" in valid_fields else "evaluation_strategy"
 
     use_bf16 = (
         torch.cuda.is_available()
@@ -678,7 +685,6 @@ def main(
         "gradient_accumulation_steps": grad_accum,
         "learning_rate": lr,
         "weight_decay": weight_decay,
-        "warmup_ratio": warmup_ratio,
         "lr_scheduler_type": "cosine",
         "logging_steps": logging_steps,
         "logging_first_step": True,
@@ -698,17 +704,22 @@ def main(
         "remove_unused_columns": False,
         "label_names": ["labels"],
     }
-    if "gradient_checkpointing_kwargs" in sig:
+
+    # Handle warmup: in transformers v5, warmup_ratio was removed in favor of warmup_steps (which accepts float ratio)
+    if "warmup_ratio" in valid_fields:
+        args_dict["warmup_ratio"] = warmup_ratio
+    elif "warmup_steps" in valid_fields:
+        args_dict["warmup_steps"] = warmup_ratio
+
+    if "gradient_checkpointing_kwargs" in valid_fields:
         args_dict["gradient_checkpointing_kwargs"] = {"use_reentrant": False}
-    if "tf32" in sig:
+    if "tf32" in valid_fields:
         args_dict["tf32"] = use_bf16
 
-    # Safe fallback: filter any kwargs not supported by current transformers version
-    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.values())
-    if not has_var_keyword:
-        args_dict = {k: v for k, v in args_dict.items() if k in sig}
+    # Strictly keep only fields that exist in the active transformers version
+    final_args = {k: v for k, v in args_dict.items() if k in valid_fields}
 
-    training_args = TrainingArguments(**args_dict)
+    training_args = TrainingArguments(**final_args)
 
     # Data collator: pads input_ids, attention_mask, and labels
     data_collator = DataCollatorForSeq2Seq(
