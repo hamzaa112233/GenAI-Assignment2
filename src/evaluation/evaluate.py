@@ -193,8 +193,21 @@ def run_full_evaluation(
         ds_dict, _ = prepare_datasets()
         test_dataset = ds_dict["test"]
 
-    logger.info("Running inference on %d test examples ...", len(test_dataset))
-    raw_outputs = run_inference_on_dataset(model, tokenizer, test_dataset)
+    # Check for cached predictions to avoid re-running 11min inference if already done
+    cache_path = os.path.join(output_dir, "test_raw_outputs_cache.json")
+    if os.path.exists(cache_path):
+        logger.info("Found cached test outputs at %s. Loading...", cache_path)
+        with open(cache_path, "r", encoding="utf-8") as f:
+            raw_outputs = json.load(f)
+    else:
+        logger.info("Running inference on %d test examples ...", len(test_dataset))
+        raw_outputs = run_inference_on_dataset(model, tokenizer, test_dataset)
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(raw_outputs, f, indent=2)
+            logger.info("Saved raw outputs cache to %s", cache_path)
+        except Exception as e:
+            logger.warning("Could not save outputs cache: %s", e)
 
     # Parse predictions
     predictions = [parse_prediction(out) for out in raw_outputs]
@@ -232,7 +245,12 @@ def run_full_evaluation(
     class_metrics = compute_classification_metrics(true_labels, pred_labels)
 
     logger.info("Computing confusion matrices ...")
-    compute_confusion_matrices(true_labels, pred_labels, criterion_types, figures_dir)
+    compute_confusion_matrices(
+        true_labels,
+        pred_labels,
+        criteria_types=criterion_types,
+        save_dir=figures_dir,
+    )
 
     logger.info("Computing evidence metrics ...")
     ev_metrics = compute_evidence_metrics(
@@ -240,20 +258,28 @@ def run_full_evaluation(
         [list(s) for s in pred_evidence],
     )
 
-    logger.info("Running error analysis ...")
-    samples_for_analysis = []
+    # Build sample dicts for error analysis
+    err_samples = []
     for i in range(len(test_dataset)):
-        samples_for_analysis.append({
+        ex = test_dataset[i]
+        err_samples.append({
             "index": i,
             "true_label": true_labels[i],
             "pred_label": pred_labels[i],
+            "gold_evidence": list(true_evidence[i]),
             "true_evidence": list(true_evidence[i]),
             "pred_evidence": list(pred_evidence[i]),
+            "criteria_type": criterion_types[i],
             "criterion_type": criterion_types[i],
+            "patient_description": ex.get("note", ex.get("patient_description", "")),
+            "criterion_text": ex.get("criterion_text", ex.get("criterion", "")),
+            "criterion_id": i,
             "raw_output": raw_outputs[i],
             "parse_success": predictions[i]["parse_success"],
         })
-    err_analysis = error_analysis(samples_for_analysis, output_dir=output_dir)
+
+    logger.info("Running error analysis ...")
+    err_analysis = error_analysis(err_samples, save_dir=figures_dir)
 
     # Full report
     all_results = {
@@ -265,21 +291,6 @@ def run_full_evaluation(
     }
 
     logger.info("Generating evaluation report ...")
-    # Build sample dicts for error analysis
-    err_samples = []
-    for i in range(len(test_dataset)):
-        ex = test_dataset[i]
-        err_samples.append({
-            "true_label": true_labels[i],
-            "pred_label": pred_labels[i],
-            "gold_evidence": list(true_evidence[i]),
-            "pred_evidence": list(pred_evidence[i]),
-            "criteria_type": criterion_types[i],
-            "patient_description": ex.get("note", ex.get("patient_description", "")),
-            "criterion_text": ex.get("criterion_text", ex.get("criterion", "")),
-            "criterion_id": i,
-        })
-
     full_report = generate_evaluation_report(
         y_true=true_labels,
         y_pred=pred_labels,

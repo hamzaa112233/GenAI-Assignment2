@@ -271,8 +271,8 @@ def compute_confusion_matrices(
     y_true: List[str],
     y_pred: List[str],
     criteria_types: Optional[List[str]] = None,
-    label_names: Optional[List[str]] = None,
-    save_dir: Optional[Path] = None,
+    label_names: Optional[Any] = None,
+    save_dir: Optional[Any] = None,
 ) -> Dict[str, np.ndarray]:
     """Compute and save overall / inclusion / exclusion confusion matrices.
 
@@ -286,9 +286,9 @@ def compute_confusion_matrices(
         Parallel list with ``"inclusion"`` or ``"exclusion"`` for each sample.
         If *None*, only the overall matrix is produced.
     label_names : list[str] | None
-        Ordered label names.  Defaults to ``LABEL_NAMES``.
-    save_dir : Path | None
-        Directory for saving figures.  Defaults to ``FIGURES_DIR``.
+        Ordered label names. Defaults to ``LABEL_NAMES``.
+    save_dir : Path | str | None
+        Directory for saving figures. Defaults to ``FIGURES_DIR``.
 
     Returns
     -------
@@ -297,10 +297,18 @@ def compute_confusion_matrices(
            "exclusion": np.ndarray | None}``
     """
     _ensure_dirs()
+
+    # Handle argument swapping if 4th positional argument is save_dir (str or Path)
+    if isinstance(label_names, (str, Path)):
+        save_dir = label_names
+        label_names = None
+
     if label_names is None:
         label_names = LABEL_NAMES
     if save_dir is None:
         save_dir = FIGURES_DIR
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
 
     # Overall
     cm_overall = confusion_matrix(y_true, y_pred, labels=label_names)
@@ -452,7 +460,8 @@ def compute_evidence_metrics(
 def error_analysis(
     samples: List[Dict[str, Any]],
     max_examples_per_category: int = 5,
-    save_dir: Optional[Path] = None,
+    save_dir: Optional[Any] = None,
+    output_dir: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Perform structured error analysis over model predictions.
 
@@ -470,8 +479,10 @@ def error_analysis(
             - ``criterion_id`` (str | int, optional)
     max_examples_per_category : int
         Maximum number of examples to store per error category.
-    save_dir : Path | None
+    save_dir : Path | str | None
         Directory for saving the error analysis text file.
+    output_dir : Path | str | None
+        Alias for save_dir.
 
     Returns
     -------
@@ -480,7 +491,9 @@ def error_analysis(
     """
     _ensure_dirs()
     if save_dir is None:
-        save_dir = FIGURES_DIR
+        save_dir = output_dir if output_dir is not None else FIGURES_DIR
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
     # Define the 8 error categories + collectors
@@ -803,7 +816,7 @@ def generate_evaluation_report(
     criteria_types: Optional[List[str]] = None,
     samples: Optional[List[Dict[str, Any]]] = None,
     label_names: Optional[List[str]] = None,
-    save_dir: Optional[Path] = None,
+    save_dir: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Run *all* evaluation metrics and produce a complete text report.
 
@@ -826,6 +839,8 @@ def generate_evaluation_report(
         label_names = LABEL_NAMES
     if save_dir is None:
         save_dir = REPORTS_DIR
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
 
     figures_dir = save_dir / "figures" if (save_dir / "figures").exists() or save_dir == REPORTS_DIR else save_dir
     figures_dir.mkdir(parents=True, exist_ok=True)
