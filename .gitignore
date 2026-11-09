@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model outputs
+outputs/
+checkpoints/
+*.bin
+*.safetensors
+*.pt
+*.pth
+
+# Data cache
+data_cache/
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reports (keep figures, exclude large generated files)
+reports/all_results.json
+
+# HuggingFace cache
+*.lock

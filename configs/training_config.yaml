@@ -1,0 +1,25 @@
+# Training Configuration for Clinical Trial Eligibility NLP
+# Model: Qwen2.5-1.5B-Instruct fine-tuned with LoRA on TrialGPT criterion annotations
+
+model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+max_length: 2048
+
+# LoRA hyperparameters
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+
+# Training hyperparameters
+learning_rate: 2.0e-4
+num_epochs: 3
+batch_size: 4
+gradient_accumulation_steps: 4
+warmup_ratio: 0.1
+weight_decay: 0.01
+seed: 42
+
+# Output and logging
+output_dir: "./outputs"
+logging_steps: 10
+save_steps: 100
+eval_steps: 100

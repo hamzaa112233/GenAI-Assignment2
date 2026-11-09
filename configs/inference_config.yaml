@@ -1,0 +1,13 @@
+# Inference Configuration for Clinical Trial Eligibility NLP
+# Speculative decoding with draft model for faster inference
+
+max_new_tokens: 512
+temperature: 1.0
+top_p: 1.0
+do_sample: false
+
+# KV-cache and speculative decoding
+kv_cache_tile_size: 256
+speculative_k: 5
+draft_model: "Qwen/Qwen2.5-0.5B-Instruct"
+target_model: "Qwen/Qwen2.5-1.5B-Instruct"
