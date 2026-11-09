@@ -1,16 +1,14 @@
 \documentclass[conference]{IEEEtran}
 \usepackage{cite}
 \usepackage{amsmath,amssymb,amsfonts}
-\usepackage{algorithmic}
 \usepackage{graphicx}
 \usepackage{textcomp}
 \usepackage{xcolor}
 \usepackage{hyperref}
 \usepackage{booktabs}
-\usepackage{algorithm}
-\usepackage{listings}
 \usepackage{multirow}
-\usepackage{subcaption}
+
+\graphicspath{{figures/}{reports/figures/}}
 
 \hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
 
@@ -215,18 +213,9 @@ As shown in Figure~\ref{fig:cm_overall}, the model demonstrates highest precisio
 
 \begin{figure}[htbp]
 \centering
-\begin{subfigure}[b]{0.48\columnwidth}
-\includegraphics[width=\textwidth]{figures/confusion_matrix_inclusion.png}
-\caption{Inclusion Criteria}
-\label{fig:cm_inc}
-\end{subfigure}
-\hfill
-\begin{subfigure}[b]{0.48\columnwidth}
-\includegraphics[width=\textwidth]{figures/confusion_matrix_exclusion.png}
-\caption{Exclusion Criteria}
-\label{fig:cm_exc}
-\end{subfigure}
-\caption{Stratified confusion matrices evaluated separately for (a) inclusion criteria and (b) exclusion criteria.}
+\includegraphics[width=0.48\columnwidth]{figures/confusion_matrix_inclusion.png}\hfill
+\includegraphics[width=0.48\columnwidth]{figures/confusion_matrix_exclusion.png}
+\caption{Stratified confusion matrices evaluated separately for (left) inclusion criteria and (right) exclusion criteria.}
 \label{fig:cm_split}
 \end{figure}
 
