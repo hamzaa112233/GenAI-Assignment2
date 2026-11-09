@@ -670,8 +670,12 @@ def main(
 
     eval_strategy_key = "eval_strategy" if "eval_strategy" in valid_fields else "evaluation_strategy"
 
-    use_bf16 = (
+    is_ampere_or_newer = (
         torch.cuda.is_available()
+        and torch.cuda.get_device_capability()[0] >= 8
+    )
+    use_bf16 = (
+        is_ampere_or_newer
         and hasattr(torch.cuda, "is_bf16_supported")
         and torch.cuda.is_bf16_supported()
     )
@@ -714,7 +718,7 @@ def main(
     if "gradient_checkpointing_kwargs" in valid_fields:
         args_dict["gradient_checkpointing_kwargs"] = {"use_reentrant": False}
     if "tf32" in valid_fields:
-        args_dict["tf32"] = use_bf16
+        args_dict["tf32"] = is_ampere_or_newer
 
     # Strictly keep only fields that exist in the active transformers version
     final_args = {k: v for k, v in args_dict.items() if k in valid_fields}

@@ -36,7 +36,12 @@ logger = logging.getLogger(__name__)
 
 def get_compute_dtype() -> torch.dtype:
     """Return appropriate compute dtype: bfloat16 on Ampere+, else float16."""
-    if torch.cuda.is_available() and hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported():
+    if (
+        torch.cuda.is_available()
+        and torch.cuda.get_device_capability()[0] >= 8
+        and hasattr(torch.cuda, "is_bf16_supported")
+        and torch.cuda.is_bf16_supported()
+    ):
         return torch.bfloat16
     return torch.float16 if torch.cuda.is_available() else torch.float32
 
