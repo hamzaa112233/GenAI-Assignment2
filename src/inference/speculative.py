@@ -77,16 +77,70 @@ def _load_model(name: str, device: str):
     return model
 
 
+def _to_model_cache(cache):
+    """Ensure cache is passed as a Cache object (DynamicCache) or tuple."""
+    if cache is None:
+        return None
+    if hasattr(cache, "get_query_offset") or hasattr(cache, "update"):
+        return cache
+    try:
+        from transformers import DynamicCache
+        if isinstance(cache, (list, tuple)):
+            c = DynamicCache()
+            c.key_cache = [layer[0] for layer in cache]
+            c.value_cache = [layer[1] for layer in cache]
+            if len(c.key_cache) > 0:
+                c._seen_tokens = c.key_cache[0].shape[-2]
+            return c
+    except Exception:
+        pass
+    return tuple((layer[0], layer[1]) for layer in cache) if isinstance(cache, list) else cache
+
+
+def _clone_cache(cache):
+    """Deep clone a Cache or list/tuple of (K, V)."""
+    if cache is None:
+        return None
+    try:
+        from transformers import DynamicCache
+        if hasattr(cache, "key_cache") and hasattr(cache, "value_cache"):
+            c = DynamicCache()
+            c.key_cache = [k.clone() for k in cache.key_cache]
+            c.value_cache = [v.clone() for v in cache.value_cache]
+            c._seen_tokens = getattr(cache, "_seen_tokens", 0) or (c.key_cache[0].shape[-2] if len(c.key_cache) > 0 else 0)
+            return c
+    except Exception:
+        pass
+    if isinstance(cache, (list, tuple)):
+        return [(k.clone(), v.clone()) for k, v in cache]
+    import copy
+    return copy.deepcopy(cache)
+
+
+def _truncate_cache(cache, seq_len: int):
+    """Truncate a Cache or list/tuple of (K, V) to seq_len."""
+    if cache is None:
+        return None
+    try:
+        from transformers import DynamicCache
+        if hasattr(cache, "key_cache") and hasattr(cache, "value_cache"):
+            c = DynamicCache()
+            c.key_cache = [k[:, :, :seq_len, :].clone() for k in cache.key_cache]
+            c.value_cache = [v[:, :, :seq_len, :].clone() for v in cache.value_cache]
+            c._seen_tokens = seq_len
+            return c
+    except Exception:
+        pass
+    if isinstance(cache, (list, tuple)):
+        return [(k[:, :, :seq_len, :].clone(), v[:, :, :seq_len, :].clone()) for k, v in cache]
+    return cache
+
+
 def _cache_to_list(past_kv):
     """Normalise DynamicCache / tuple-of-tuples to list[(K, V)]."""
     if hasattr(past_kv, "key_cache") and hasattr(past_kv, "value_cache"):
         return [(k, v) for k, v in zip(past_kv.key_cache, past_kv.value_cache)]
     return [(layer[0], layer[1]) for layer in past_kv]
-
-
-def _truncate_cache(cache, seq_len):
-    """Truncate each layer's K/V to *seq_len* on the sequence dimension."""
-    return [(k[:, :, :seq_len, :], v[:, :, :seq_len, :]) for k, v in cache]
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +186,7 @@ class TargetOnlyGenerator:
         pos_ids = torch.arange(prompt_len, device=self.device).unsqueeze(0)
         out = self.model(input_ids=input_ids, attention_mask=attn_mask,
                          position_ids=pos_ids, use_cache=True)
-        past = _cache_to_list(out.past_key_values)
+        past = out.past_key_values
         next_tok = out.logits[:, -1, :].argmax(-1, keepdim=True)
         generated = [next_tok.item()]
 
@@ -144,11 +198,10 @@ class TargetOnlyGenerator:
         # Decode
         for _ in range(self.max_new_tokens - 1):
             pos_ids = torch.tensor([[cur_pos]], device=self.device)
-            pkv = tuple((k, v) for k, v in past)
             out = self.model(input_ids=next_tok, attention_mask=attn_mask,
-                             position_ids=pos_ids, past_key_values=pkv,
+                             position_ids=pos_ids, past_key_values=past,
                              use_cache=True)
-            past = _cache_to_list(out.past_key_values)
+            past = out.past_key_values
             next_tok = out.logits[:, -1, :].argmax(-1, keepdim=True)
             tid = next_tok.item()
             generated.append(tid)
@@ -230,10 +283,10 @@ class SpeculativeDecoder:
 
         # ---------- Prefill both models ----------
         draft_out = self.draft_model(input_ids=input_ids, use_cache=True)
-        draft_cache = _cache_to_list(draft_out.past_key_values)
+        draft_cache = draft_out.past_key_values
 
         target_out = self.target_model(input_ids=input_ids, use_cache=True)
-        target_cache = _cache_to_list(target_out.past_key_values)
+        target_cache = target_out.past_key_values
 
         # First token from target model
         next_tok_id = target_out.logits[:, -1, :].argmax(-1).item()
@@ -242,16 +295,16 @@ class SpeculativeDecoder:
         # Sync draft cache – also feed the first token through draft
         draft_inp = torch.tensor([[next_tok_id]], device=self.device)
         draft_out = self.draft_model(input_ids=draft_inp,
-                                      past_key_values=tuple((k, v) for k, v in draft_cache),
+                                      past_key_values=_to_model_cache(draft_cache),
                                       use_cache=True)
-        draft_cache = _cache_to_list(draft_out.past_key_values)
+        draft_cache = draft_out.past_key_values
 
         # Target cache already contains the prefix; add the first generated token
         target_inp = torch.tensor([[next_tok_id]], device=self.device)
         target_out = self.target_model(input_ids=target_inp,
-                                        past_key_values=tuple((k, v) for k, v in target_cache),
+                                        past_key_values=_to_model_cache(target_cache),
                                         use_cache=True)
-        target_cache = _cache_to_list(target_out.past_key_values)
+        target_cache = target_out.past_key_values
 
         total_accepted = 0
         total_draft_rounds = 0
@@ -264,10 +317,9 @@ class SpeculativeDecoder:
 
             # Step 1: Draft K tokens autoregressively with the draft model
             draft_tokens: List[int] = []
-            draft_cache_snapshot = [(k.clone(), v.clone()) for k, v in draft_cache]
+            draft_cache_snapshot = _clone_cache(draft_cache)
 
-            cur_tok = torch.tensor([[generated[-1]]], device=self.device)
-            temp_draft_cache = [(k, v) for k, v in draft_cache]
+            temp_draft_cache = _clone_cache(draft_cache)
 
             for _ in range(self.K):
                 # Get draft model's next-token prediction
@@ -282,10 +334,10 @@ class SpeculativeDecoder:
                 d_inp = torch.tensor([[d_tok_id]], device=self.device)
                 draft_out = self.draft_model(
                     input_ids=d_inp,
-                    past_key_values=tuple((k, v) for k, v in temp_draft_cache),
+                    past_key_values=_to_model_cache(temp_draft_cache),
                     use_cache=True,
                 )
-                temp_draft_cache = _cache_to_list(draft_out.past_key_values)
+                temp_draft_cache = draft_out.past_key_values
 
             if not draft_tokens:
                 break
@@ -296,11 +348,11 @@ class SpeculativeDecoder:
             verify_ids = torch.tensor([draft_tokens], device=self.device)  # (1, num_draft)
             target_out = self.target_model(
                 input_ids=verify_ids,
-                past_key_values=tuple((k, v) for k, v in target_cache),
+                past_key_values=_clone_cache(target_cache),
                 use_cache=True,
             )
             target_logits = target_out.logits  # (1, num_draft, vocab)
-            new_target_cache = _cache_to_list(target_out.past_key_values)
+            new_target_cache = target_out.past_key_values
 
             # Step 3: Greedy verification – accept prefix where target agrees
             n_accepted = 0
@@ -330,63 +382,46 @@ class SpeculativeDecoder:
                 bonus_inp = torch.tensor([[bonus]], device=self.device)
                 draft_out = self.draft_model(
                     input_ids=bonus_inp,
-                    past_key_values=tuple((k, v) for k, v in draft_cache),
+                    past_key_values=_to_model_cache(draft_cache),
                     use_cache=True,
                 )
-                draft_cache = _cache_to_list(draft_out.past_key_values)
+                draft_cache = draft_out.past_key_values
 
                 target_out_b = self.target_model(
                     input_ids=bonus_inp,
-                    past_key_values=tuple((k, v) for k, v in target_cache),
+                    past_key_values=_to_model_cache(target_cache),
                     use_cache=True,
                 )
-                target_cache = _cache_to_list(target_out_b.past_key_values)
+                target_cache = target_out_b.past_key_values
                 continue
 
             # Step 4: KV-cache rollback on rejection
-            # We accepted n_accepted tokens from the draft.
-            # Target cache now has prefix + all draft tokens; truncate to prefix + accepted + 1 (the target correction)
-            cache_len = prompt_len + len(generated)  # total valid length
-            target_cache = _truncate_cache(new_target_cache, cache_len)
-
-            # Append accepted tokens before the rejection token
-            for tok in draft_tokens[:n_accepted]:
-                pass  # These are implicitly handled — the rejection token was already appended
-
-            # Wait, we need to actually add the accepted draft tokens to generated
-            # The rejection token is already added above; add the accepted ones before it
             rejection_tok = generated.pop()  # temporarily remove rejection token
             for tok in draft_tokens[:n_accepted]:
                 generated.append(tok)
             generated.append(rejection_tok)  # re-add
 
-            # Roll back draft cache to the snapshot and replay accepted tokens + correction
-            draft_cache = draft_cache_snapshot
+            # Roll back draft cache to snapshot and replay accepted tokens + correction
+            draft_cache = _clone_cache(draft_cache_snapshot)
             replay_tokens = draft_tokens[:n_accepted] + [rejection_tok]
             replay_inp = torch.tensor([replay_tokens], device=self.device)
             draft_out = self.draft_model(
                 input_ids=replay_inp,
-                past_key_values=tuple((k, v) for k, v in draft_cache),
+                past_key_values=_to_model_cache(draft_cache),
                 use_cache=True,
             )
-            draft_cache = _cache_to_list(draft_out.past_key_values)
+            draft_cache = draft_out.past_key_values
 
-            # Recalculate target cache length
-            target_cache = _truncate_cache(target_cache, prompt_len + len(generated))
-
-            # Feed correction token through target to sync its cache
-            corr_inp = torch.tensor([[rejection_tok]], device=self.device)
-            # Target cache was truncated; we need to re-feed from accepted prefix
-            # Actually we already have the cache up to n_accepted drafts + prompt
-            # Truncate more carefully
+            # Truncate target cache to prefix + accepted tokens, then feed correction
             trunc_len = prompt_len + len(generated) - 1  # everything before correction
             target_cache_trunc = _truncate_cache(new_target_cache, trunc_len)
+            corr_inp = torch.tensor([[rejection_tok]], device=self.device)
             target_out_c = self.target_model(
                 input_ids=corr_inp,
-                past_key_values=tuple((k, v) for k, v in target_cache_trunc),
+                past_key_values=_to_model_cache(target_cache_trunc),
                 use_cache=True,
             )
-            target_cache = _cache_to_list(target_out_c.past_key_values)
+            target_cache = target_out_c.past_key_values
 
         # Trim to max_new_tokens
         generated = generated[:self.max_new_tokens]

@@ -227,10 +227,7 @@ class KVCachedGenerator:
             use_cache=True,
         )
         logits = outputs.logits  # (1, prompt_len, vocab)
-        past_key_values = outputs.past_key_values  # tuple of (key, value) per layer
-
-        # Convert DynamicCache or similar to a plain list so we manage it ourselves
-        past_key_values = self._to_list_of_tuples(past_key_values)
+        past_key_values = outputs.past_key_values  # native Cache / tuple per layer
 
         next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)  # (1, 1)
 
@@ -255,20 +252,15 @@ class KVCachedGenerator:
         for _ in range(self.max_new_tokens - 1):
             position_ids = torch.tensor([[current_pos]], device=self.device)
 
-            # Reconstruct past_key_values as a tuple-of-tuples for the model
-            pkv_tuple = tuple(
-                (layer_k, layer_v) for layer_k, layer_v in past_key_values
-            )
-
             outputs = self.model(
                 input_ids=next_token,
                 attention_mask=attention_mask,
                 position_ids=position_ids,
-                past_key_values=pkv_tuple,
+                past_key_values=past_key_values,
                 use_cache=True,
             )
             logits = outputs.logits  # (1, 1, vocab)
-            past_key_values = self._to_list_of_tuples(outputs.past_key_values)
+            past_key_values = outputs.past_key_values
 
             next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)
             token_id = next_token.item()
