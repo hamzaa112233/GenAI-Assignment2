@@ -878,9 +878,10 @@ def main() -> None:
             value="Qwen/Qwen2.5-1.5B-Instruct",
             help="HuggingFace model ID or local path to the fine-tuned model.",
         )
+        default_adapter = "outputs/best_adapter" if os.path.isdir("outputs/best_adapter") else "./outputs/lora_adapter"
         adapter_path = st.text_input(
             "🔗 LoRA Adapter Path (optional)",
-            value="./outputs/lora_adapter",
+            value=default_adapter,
             help="Path to the LoRA adapter directory (leave blank if merged).",
         )
         inference_mode = st.selectbox(
