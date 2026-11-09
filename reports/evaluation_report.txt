@@ -1,0 +1,65 @@
+================================================================================
+EVALUATION REPORT – Clinical Trial Eligibility NLP
+================================================================================
+
+1.  CLASSIFICATION METRICS (4-class)
+--------------------------------------------------
+  Samples evaluated : 206
+  Accuracy          : 0.6262
+  Macro F1          : 0.5440
+  Macro Precision   : 0.5517
+  Macro Recall      : 0.5810
+  Weighted F1       : 0.6565
+
+  Per-class breakdown:
+    eligible              P=0.4359  R=0.6296  F1=0.5152  support=27
+    not_eligible          P=0.9692  R=0.6429  F1=0.7730  support=98
+    not_applicable        P=0.1875  R=0.4000  F1=0.2553  support=15
+    not_enough_info       P=0.6143  R=0.6515  F1=0.6324  support=66
+
+2.  CONFUSION MATRICES
+--------------------------------------------------
+  Overall confusion matrix:
+[[17  2  1  7]
+ [12 63  9 14]
+ [ 3  0  6  6]
+ [ 7  0 16 43]]
+  Inclusion confusion matrix:
+[[17  2  1  7]
+ [ 0  6  0  1]
+ [ 1  0  1  1]
+ [ 5  0  9 24]]
+  Exclusion confusion matrix:
+[[ 0  0  0  0]
+ [12 57  9 13]
+ [ 2  0  5  5]
+ [ 2  0  7 19]]
+  Figures saved to: reports\figures\confusion_matrix_*.png
+
+3.  EVIDENCE RETRIEVAL METRICS
+--------------------------------------------------
+  Micro Precision : 0.5000
+  Micro Recall    : 0.6489
+  Micro F1        : 0.5648
+  Macro Precision : 0.7039
+  Macro Recall    : 0.9006
+  Macro F1        : 0.6875
+  Total TP=61  FP=61  FN=33
+
+4.  ERROR ANALYSIS SUMMARY
+--------------------------------------------------
+  Total errors : 115
+  Error rate   : 0.5583
+  [eligible_vs_not_eligible] 5 examples found
+  [not_applicable_confusion] 5 examples found
+  [not_enough_info_confusion] 5 examples found
+  [missing_evidence_recall] 5 examples found
+  [spurious_evidence_precision] 5 examples found
+  [inclusion_exclusion_confusion] 5 examples found
+  [long_patient_truncation] 0 examples found
+  [complex_multi_condition] 5 examples found
+  Full error analysis: reports\figures\error_analysis.txt
+
+================================================================================
+END OF REPORT
+================================================================================

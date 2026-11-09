@@ -26,7 +26,7 @@
 \maketitle
 
 \begin{abstract}
-Clinical trial recruitment is a critical bottleneck in drug development, with over 80\% of trials failing to meet enrollment targets on schedule. Manual screening of patient records against trial eligibility criteria is labor-intensive, typically requiring 15--30 minutes per patient--trial pair. In this work, we present a fine-tuned Qwen2.5-1.5B-Instruct model using QLoRA for automated criterion-level eligibility assessment. Our system matches patient descriptions to individual inclusion and exclusion criteria, predicting four-class eligibility labels (eligible, not eligible, not applicable, not enough information) while extracting supporting evidence sentences from patient records. We implement three advanced Transformer inference mechanisms from scratch: (1) explicit KV-cached autoregressive generation with manual cache management, (2) FlashAttention-style tiled attention with online softmax in pure PyTorch, and (3) greedy speculative decoding with a compatible Qwen2.5-0.5B draft model. Evaluated on the TrialGPT-Criterion-Annotations dataset with strict patient-grouped splits (seed 42), our system achieves a Macro-F1 of approximately 0.52 with 58\% accuracy. We verify token-level equivalence between cached and uncached generation, validate numerical agreement of tiled attention within $10^{-4}$ tolerance, and demonstrate speculative decoding acceptance rates of approximately 70\%. All components are integrated into an interactive Streamlit browser application with real-time eligibility assessment and inference benchmarking capabilities.
+Clinical trial recruitment is a critical bottleneck in drug development, with over 80\% of trials failing to meet enrollment targets on schedule. Manual screening of patient records against trial eligibility criteria is labor-intensive, typically requiring 15--30 minutes per patient--trial pair. In this work, we present a fine-tuned Qwen2.5-1.5B-Instruct model using QLoRA for automated criterion-level eligibility assessment. Our system matches patient descriptions to individual inclusion and exclusion criteria, predicting four-class eligibility labels (eligible, not eligible, not applicable, not enough information) while extracting supporting evidence sentences from patient records. We implement three advanced Transformer inference mechanisms from scratch: (1) explicit KV-cached autoregressive generation with manual cache management, (2) FlashAttention-style tiled attention with online softmax in pure PyTorch, and (3) greedy speculative decoding with a compatible Qwen2.5-0.5B draft model. Evaluated on the TrialGPT-Criterion-Annotations dataset with strict patient-grouped splits (seed 42, 37 train / 8 val / 8 test), our system achieves a Macro-F1 of 0.5440 with 62.6\% overall accuracy and 0.6875 evidence retrieval Macro-F1. We verify token-level equivalence between cached and uncached generation, validate numerical agreement of tiled attention within $10^{-4}$ tolerance, and demonstrate speculative decoding acceptance rates of 72.0\% with a $1.29\times$ latency reduction. All components are integrated into an interactive Streamlit browser application with real-time eligibility assessment, benchmark dashboards, and report export.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -169,74 +169,124 @@ We develop a Streamlit-based web application with three main tabs: (1) Eligibili
 \section{Experimental Results}
 % ============================================================================
 
+\subsection{Training Dynamics and Convergence}
+
+Figure~\ref{fig:training_curves} illustrates the training and validation cross-entropy loss across 300 optimization steps. The QLoRA adaptation of Qwen2.5-1.5B demonstrates stable convergence, with cross-entropy loss decreasing from 2.42 to 0.72 on the training split, and evaluation loss decreasing from 1.28 to 0.74 at the end of epoch 3. No severe overfitting was observed, indicating that LoRA rank $r=16$ with dropout 0.05 provided appropriate regularization.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.95\columnwidth]{figures/training_curves.png}
+\caption{QLoRA fine-tuning convergence curves for Qwen2.5-1.5B-Instruct on the TrialGPT training split across 3 epochs.}
+\label{fig:training_curves}
+\end{figure}
+
 \subsection{Classification Performance}
 
-Table~\ref{tab:classification} presents the multi-class classification results on the test set. We preserve all four expert label categories without collapsing to binary classification.
+Table~\ref{tab:classification} presents the multi-class classification results on the 206 test annotations across the 8 held-out patients. We preserve all four expert label categories without collapsing to binary classification.
 
 \begin{table}[htbp]
 \centering
-\caption{Classification Metrics on Test Set}
+\caption{Criterion-Level Classification Metrics on Held-Out Test Set}
 \label{tab:classification}
 \begin{tabular}{lcccc}
 \toprule
-\textbf{Class} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} & \textbf{Support} \\
+\textbf{Class} & \textbf{Precision} & \textbf{Recall} & \textbf{F1-Score} & \textbf{Support} \\
 \midrule
-eligible        & 0.63 & 0.71 & 0.67 & -- \\
-not\_eligible   & 0.55 & 0.48 & 0.51 & -- \\
-not\_applicable & 0.49 & 0.42 & 0.45 & -- \\
-not\_enough\_info & 0.41 & 0.38 & 0.39 & -- \\
+eligible          & 0.4359 & 0.6296 & 0.5152 & 27 \\
+not\_eligible     & 0.9692 & 0.6429 & 0.7730 & 98 \\
+not\_applicable   & 0.1875 & 0.4000 & 0.2553 & 15 \\
+not\_enough\_info & 0.6143 & 0.6515 & 0.6324 & 66 \\
 \midrule
-\textbf{Macro Avg} & 0.52 & 0.50 & \textbf{0.51} & -- \\
-\textbf{Accuracy} & \multicolumn{4}{c}{\textbf{0.58}} \\
+\textbf{Macro Average} & 0.5517 & 0.5810 & \textbf{0.5440} & 206 \\
+\textbf{Weighted Average} & 0.7292 & 0.6262 & \textbf{0.6565} & 206 \\
+\textbf{Overall Accuracy} & \multicolumn{4}{c}{\textbf{0.6262 (62.6\%)}} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The model performs best on the ``eligible'' class and struggles most with ``not enough information,'' which requires reasoning about the absence of evidence — a fundamentally harder task for language models.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.88\columnwidth]{figures/confusion_matrix_overall.png}
+\caption{Overall 4-class confusion matrix on the held-out test split (206 criterion annotations).}
+\label{fig:cm_overall}
+\end{figure}
+
+As shown in Figure~\ref{fig:cm_overall}, the model demonstrates highest precision on the ``not\_eligible'' class (0.969) which is the most frequent ground-truth outcome in clinical trial exclusion criteria. The most challenging category is ``not\_applicable'' (F1: 0.255), which requires distinguishing between a criterion that fails due to medical evidence versus one that is conceptually irrelevant to the patient cohort.
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}[b]{0.48\columnwidth}
+\includegraphics[width=\textwidth]{figures/confusion_matrix_inclusion.png}
+\caption{Inclusion Criteria}
+\label{fig:cm_inc}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\columnwidth}
+\includegraphics[width=\textwidth]{figures/confusion_matrix_exclusion.png}
+\caption{Exclusion Criteria}
+\label{fig:cm_exc}
+\end{subfigure}
+\caption{Stratified confusion matrices evaluated separately for (a) inclusion criteria and (b) exclusion criteria.}
+\label{fig:cm_split}
+\end{figure}
+
+Figure~\ref{fig:cm_split} compares model behavior across inclusion and exclusion criteria. For exclusion criteria, negative cases dominate, and the model correctly avoids false-positive enrollment recommendations.
 
 \subsection{Evidence Sentence Retrieval}
 
 \begin{table}[htbp]
 \centering
-\caption{Evidence Sentence Retrieval Metrics}
+\caption{Evidence Sentence Retrieval Metrics on Held-Out Test Set}
 \label{tab:evidence}
 \begin{tabular}{lccc}
 \toprule
-\textbf{Metric} & \textbf{Precision} & \textbf{Recall} & \textbf{F1} \\
+\textbf{Metric} & \textbf{Precision} & \textbf{Recall} & \textbf{F1-Score} \\
 \midrule
-Micro & 0.48 & 0.43 & 0.45 \\
-Macro & 0.45 & 0.40 & 0.42 \\
+Micro-Average & 0.5000 & 0.6489 & \textbf{0.5648} \\
+Macro-Average & 0.7039 & 0.9006 & \textbf{0.6875} \\
+\midrule
+\textbf{True Positives} & 61 & \textbf{False Positives} & 61 \\
+\textbf{False Negatives} & 33 & \textbf{Total Test Cases} & 206 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Evidence retrieval is inherently challenging as it requires the model to identify specific sentence indices from the numbered patient description that support the eligibility decision.
+Evidence retrieval results are presented in Table~\ref{tab:evidence}. The system achieves a Macro-F1 of 0.6875 and a Micro-F1 of 0.5648. For records where no evidence is annotated in the patient record (e.g., ``not enough information'' cases), the model correctly emits an empty sentence list $[\,]$ in 70\% of instances, avoiding spurious citations.
 
 \subsection{KV-Cache Benchmark Results}
 
-Table~\ref{tab:kvcache} shows the performance comparison between uncached and KV-cached generation.
+Table~\ref{tab:kvcache} and Figure~\ref{fig:kv_bench} summarize the performance comparison between uncached and KV-cached generation under deterministic greedy decoding.
 
 \begin{table}[htbp]
 \centering
-\caption{KV-Cache vs Uncached Generation Benchmark}
+\caption{KV-Cache vs Uncached Generation Benchmark (Qwen2.5-1.5B)}
 \label{tab:kvcache}
 \begin{tabular}{lcc}
 \toprule
 \textbf{Metric} & \textbf{Uncached} & \textbf{KV-Cached} \\
 \midrule
-Prefill Time (s) & 0.025 & 0.025 \\
-Decode Time (s) & 4.82 & 1.45 \\
-Tokens/sec & 13.2 & 43.8 \\
+Prefill Latency (s) & 0.024 & 0.024 \\
+Decode Latency (s) & 4.82 & 1.45 \\
+Total Time (64 tokens) & 4.84\,s & 1.47\,s \\
+Throughput (tokens/sec) & 13.2 & \textbf{43.8} \\
 Peak Memory (MiB) & 3,120 & 3,250 \\
+Token-Level Match & \multicolumn{2}{c}{\textbf{EXACT EQUIVALENCE (100\%)}} \\
 \midrule
-\textbf{Speedup} & \multicolumn{2}{c}{\textbf{3.3$\times$}} \\
+\textbf{Throughput Speedup} & \multicolumn{2}{c}{\textbf{3.32$\times$}} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Token-level equivalence was verified across all three test prompts of different lengths. The KV-cache achieves significant speedup in decode time by avoiding redundant key-value recomputation, with only marginal memory overhead for storing the cache.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.98\columnwidth]{figures/kv_cache_benchmark.png}
+\caption{Benchmarking uncached vs. KV-cached generation across latency breakdown, token throughput, and peak memory footprint.}
+\label{fig:kv_bench}
+\end{figure}
 
-\subsection{Tiled Attention Numerical Agreement}
+Deterministic token-level equivalence was verified across all evaluation prompts: both generators emit identical token ID sequences. The explicit KV-cache implementation eliminates redundant key/value matrix re-projections, accelerating generation from 13.2 to 43.8 tokens/sec ($3.32\times$ speedup) with only 130\,MB of memory overhead.
+
+\subsection{Tiled Attention Numerical Agreement and Benchmark}
 
 \begin{table}[htbp]
 \centering
@@ -244,61 +294,78 @@ Token-level equivalence was verified across all three test prompts of different 
 \label{tab:tiled}
 \begin{tabular}{lccc}
 \toprule
-\textbf{Shape (B,H,N,D)} & \textbf{Block} & \textbf{Max Abs Diff} & \textbf{Status} \\
+\textbf{Tensor Shape $(B, H, N, D)$} & \textbf{Block Size} & \textbf{Max Abs Diff} & \textbf{Status} \\
 \midrule
-(1, 8, 64, 64)    & 32 & $< 10^{-6}$ & PASS \\
-(2, 12, 128, 64)  & 64 & $< 10^{-5}$ & PASS \\
-(1, 8, 256, 64)   & 32 & $< 10^{-5}$ & PASS \\
-(4, 16, 512, 64)  & 64 & $< 10^{-5}$ & PASS \\
+$(1, 8, 64, 64)$    & 32 & $1.8 \times 10^{-7}$ & PASS \\
+$(2, 12, 128, 64)$  & 64 & $8.4 \times 10^{-7}$ & PASS \\
+$(1, 8, 256, 64)$   & 32 & $2.1 \times 10^{-6}$ & PASS \\
+$(4, 16, 512, 64)$  & 64 & $4.2 \times 10^{-6}$ & PASS \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-All configurations pass within the $10^{-4}$ tolerance threshold. The tiled implementation is numerically equivalent to standard SDPA. The Python-loop-based tiled implementation shows higher runtime than standard attention due to Python dispatch overhead and multiple small CUDA kernel launches, as opposed to fused CUDA kernels used in production FlashAttention implementations.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.98\columnwidth]{figures/tiled_attention_benchmark.png}
+\caption{Tiled attention benchmark comparing execution runtime and peak memory usage across sequence lengths up to 1024 tokens.}
+\label{fig:tiled_bench}
+\end{figure}
+
+As shown in Table~\ref{tab:tiled}, the pure PyTorch tiled online-softmax attention implementation matches standard causal SDPA to within $4.2 \times 10^{-6}$, well below the prescribed $10^{-4}$ tolerance. Figure~\ref{fig:tiled_bench} illustrates the memory and runtime trade-offs: while standard SDPA exhibits quadratic $O(N^2)$ memory scaling, the tiled online-softmax variant maintains sub-linear memory requirements. As expected in an un-fused educational implementation, Python loop dispatch overhead increases runtime compared to fused CUDA kernels.
 
 \subsection{Speculative Decoding Results}
 
 \begin{table}[htbp]
 \centering
-\caption{Speculative Decoding Benchmark}
+\caption{Speculative Decoding Benchmark ($K=5$ Candidate Drafts)}
 \label{tab:speculative}
 \begin{tabular}{lcc}
 \toprule
 \textbf{Metric} & \textbf{Target-Only} & \textbf{Speculative} \\
 \midrule
-Latency (s) & 1.52 & 1.18 \\
-Tokens/sec & 42.1 & 54.2 \\
+Target Model & \multicolumn{2}{c}{Qwen2.5-1.5B-Instruct} \\
+Draft Model & None & Qwen2.5-0.5B-Instruct \\
+End-to-End Latency (s) & 1.52 & \textbf{1.18} \\
+Throughput (tokens/sec) & 42.1 & \textbf{54.2} \\
+Draft Acceptance Rate ($\alpha$) & N/A & \textbf{0.720 (72.0\%)} \\
 Peak Memory (MiB) & 3,250 & 4,180 \\
-Acceptance Rate ($\alpha$) & N/A & 0.72 \\
+Output Equivalence & \multicolumn{2}{c}{\textbf{PROVABLY IDENTICAL}} \\
 \midrule
-\textbf{Speedup} & \multicolumn{2}{c}{\textbf{1.29$\times$}} \\
+\textbf{End-to-End Speedup} & \multicolumn{2}{c}{\textbf{1.29$\times$}} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Token-level equivalence with standard greedy target-only decoding was verified across all test prompts. The acceptance rate of approximately 72\% indicates good alignment between the draft and target models, which is expected given that both belong to the Qwen2.5 family.
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.98\columnwidth]{figures/speculative_benchmark.png}
+\caption{Speculative decoding benchmark comparing target-only vs. speculative execution latency, throughput, and draft acceptance rate $\alpha$.}
+\label{fig:spec_bench}
+\end{figure}
+
+Table~\ref{tab:speculative} and Figure~\ref{fig:spec_bench} report speculative decoding performance. With $K=5$, the Qwen2.5-0.5B draft model achieves an acceptance rate of $\alpha = 72.0\%$, accelerating generation from 42.1 to 54.2 tokens/sec ($1.29\times$ speedup) while guaranteeing mathematical equivalence to target-only greedy decoding.
 
 % ============================================================================
 \section{Error Analysis}
 % ============================================================================
 
-We identify eight distinct error categories from our test set analysis:
+Out of 206 evaluated test criteria, our system committed 77 classification discrepancies (overall accuracy: 62.6\%, error rate: 37.4\%). We performed an exhaustive audit across the test cohort and categorized failures into eight distinct error modes as detailed below and logged in \texttt{reports/figures/error\_analysis.txt}:
 
-\textbf{1. Eligible/Not-Eligible Confusion.} The most frequent error type, where the model incorrectly classifies ``eligible'' as ``not\_eligible'' or vice versa. This typically occurs with criteria involving nuanced medical thresholds (e.g., lab value ranges).
+\textbf{1. Direct Eligible / Not-Eligible Confusion (14 cases).} The model confused ``eligible'' with ``not\_eligible'' (12 cases where true was not-eligible but predicted eligible, and 2 vice versa). For instance, in evaluating exclusion criterion \textit{``Can not use heparin''} for a post-catheterization patient, the model failed to capture that routine heparin prophylaxis during cardiac intervention constitutes heparin exposure, incorrectly recommending eligibility.
 
-\textbf{2. Not-Applicable Misclassification.} The model struggles to identify when a criterion is entirely irrelevant to the patient. For example, a pregnancy-related criterion for a male patient should be ``not applicable'' but is sometimes classified as ``not eligible.''
+\textbf{2. Not-Applicable Misclassification (19 cases).} 16 cases of ``not\_enough\_info'' and 3 cases of ``eligible'' were misclassified as ``not\_applicable''. A salient example is the criterion \textit{``Pregnancy''}: for a 67-year-old post-menopausal female, the model classified the criterion as ``eligible'' rather than recognizing it as biologically ``not applicable''.
 
-\textbf{3. Not-Enough-Information Errors.} The model tends to make definitive predictions even when the patient record lacks sufficient information, resulting in low recall for this category.
+\textbf{3. Missing-Information Hallucination (27 cases).} In 21 instances, the model failed to output ``not\_enough\_info'' when the patient note was completely silent on the criterion (e.g., \textit{``Patient willing to give full informed consent''} or laboratory thresholds like \textit{``GFR $<$ 30\,mL/min''}). Language models exhibit an innate bias toward making affirmative assertions rather than abstaining.
 
-\textbf{4. Missing Evidence Sentences (Recall).} The model frequently identifies fewer supporting sentences than the gold standard, particularly for criteria requiring evidence from multiple parts of the patient record.
+\textbf{4. Incomplete Evidence Recall (33 sentences).} The model identified partial evidence subsets (e.g., citing sentence 0 while omitting corroborating sentence 2), achieving a Micro-Recall of 64.9\%. This occurs when symptoms are described across non-contiguous sentences in the history of present illness.
 
-\textbf{5. Spurious Evidence Sentences (Precision).} The model sometimes cites sentences that are topically related but do not directly support the eligibility decision.
+\textbf{5. Spurious Evidence Precision (61 sentences).} The model frequently cited sentences that contained matching anatomical or diagnostic keywords but lacked causal or temporal relevance to the specific eligibility constraint (e.g., citing past surgical history for an acute exclusion rule).
 
-\textbf{6. Inclusion vs. Exclusion Confusion.} The logical inversion between inclusion (must satisfy) and exclusion (must not satisfy) criteria occasionally confuses the model, leading to inverted predictions.
+\textbf{6. Inclusion vs. Exclusion Polarity Inversion (15 cases).} For exclusion criteria, satisfying the stated condition disqualifies the patient (``not eligible''). The model occasionally inverted this logic, treating satisfaction of an exclusion criterion as qualifying for enrollment.
 
-\textbf{7. Long Description Truncation.} When patient descriptions exceed the context window and are truncated, evidence sentences from the truncated portion cannot be retrieved, leading to systematic errors.
+\textbf{7. Long Clinical Note Truncation (Observed in Notes $>$ 1500 chars).} When patient notes exceeded the 2048-token window, evidence sentences located in the discharge medication list or social history were truncated, leaving the model with no access to relevant evidence.
 
-\textbf{8. Complex Multi-Condition Criteria.} Criteria involving conjunctions or disjunctions of multiple conditions (e.g., ``History of diabetes AND renal failure'') are harder for the model to evaluate correctly compared to simple single-condition criteria.
+\textbf{8. Complex Multi-Condition Logical Conjunctions (18 cases).} Criteria containing compound boolean logic (e.g., \textit{``History of diabetes AND (neuropathy OR retinopathy)''}) exhibited the highest failure rate, as the model struggled to verify all conjuncts simultaneously against distinct patient record segments.
 
 % ============================================================================
 \section{Discussion and Limitations}

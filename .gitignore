@@ -23,7 +23,8 @@ env/
 .ipynb_checkpoints/
 
 # Model outputs
-outputs/
+outputs/*
+!outputs/split_manifest.json
 checkpoints/
 *.bin
 *.safetensors
@@ -37,9 +38,6 @@ data_cache/
 # OS
 .DS_Store
 Thumbs.db
-
-# Reports (keep figures, exclude large generated files)
-reports/all_results.json
 
 # HuggingFace cache
 *.lock

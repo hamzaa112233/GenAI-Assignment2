@@ -1,0 +1,152 @@
+{
+  "experiment_name": "Clinical Trial Eligibility Reasoning with Transformer Inference Mechanisms",
+  "dataset": "ncbi/TrialGPT-Criterion-Annotations",
+  "patient_split": {
+    "train": 37,
+    "validation": 8,
+    "test": 8,
+    "seed": 42
+  },
+  "target_model": "Qwen/Qwen2.5-1.5B-Instruct",
+  "draft_model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "fine_tuning": {
+    "method": "QLoRA (4-bit NF4)",
+    "lora_r": 16,
+    "lora_alpha": 32,
+    "target_modules": [
+      "q_proj",
+      "k_proj",
+      "v_proj",
+      "o_proj",
+      "gate_proj",
+      "up_proj",
+      "down_proj"
+    ],
+    "epochs": 3,
+    "learning_rate": 0.0002,
+    "batch_size": 16
+  },
+  "classification_metrics": {
+    "accuracy": 0.6262135922330098,
+    "macro_f1": 0.5439574350583702,
+    "macro_precision": 0.5517284798534798,
+    "macro_recall": 0.581000481000481,
+    "weighted_f1": 0.6564503567367689,
+    "per_class": {
+      "eligible": {
+        "precision": 0.4358974358974359,
+        "recall": 0.6296296296296297,
+        "f1": 0.5151515151515151,
+        "support": 27
+      },
+      "not_eligible": {
+        "precision": 0.9692307692307692,
+        "recall": 0.6428571428571429,
+        "f1": 0.7730061349693251,
+        "support": 98
+      },
+      "not_applicable": {
+        "precision": 0.1875,
+        "recall": 0.4,
+        "f1": 0.2553191489361702,
+        "support": 15
+      },
+      "not_enough_info": {
+        "precision": 0.6142857142857143,
+        "recall": 0.6515151515151515,
+        "f1": 0.6323529411764706,
+        "support": 66
+      }
+    },
+    "classification_report_text": "                 precision    recall  f1-score   support\n\n       eligible       0.44      0.63      0.52        27\n   not_eligible       0.97      0.64      0.77        98\n not_applicable       0.19      0.40      0.26        15\nnot_enough_info       0.61      0.65      0.63        66\n\n       accuracy                           0.63       206\n      macro avg       0.55      0.58      0.54       206\n   weighted avg       0.73      0.63      0.66       206\n",
+    "n_samples": 206
+  },
+  "evidence_metrics": {
+    "micro_precision": 0.5,
+    "micro_recall": 0.648936170212766,
+    "micro_f1": 0.5648148148148148,
+    "macro_precision": 0.7038834951456311,
+    "macro_recall": 0.9006472491909385,
+    "macro_f1": 0.6875404530744338,
+    "total_tp": 61,
+    "total_fp": 61,
+    "total_fn": 33,
+    "n_samples": 206
+  },
+  "kv_cache_benchmark": {
+    "uncached": {
+      "prefill_s": 0.024,
+      "decode_s": 4.82,
+      "tokens_per_s": 13.2,
+      "peak_vram_mb": 3120
+    },
+    "kv_cached": {
+      "prefill_s": 0.024,
+      "decode_s": 1.45,
+      "tokens_per_s": 43.8,
+      "peak_vram_mb": 3250
+    },
+    "speedup": 3.32
+  },
+  "tiled_attention_benchmark": {
+    "sequence_lengths": [
+      128,
+      256,
+      512,
+      1024
+    ],
+    "standard_runtime_ms": [
+      1.2,
+      3.8,
+      14.2,
+      54.6
+    ],
+    "tiled_runtime_ms": [
+      4.1,
+      11.2,
+      36.8,
+      128.5
+    ],
+    "standard_memory_mb": [
+      14.5,
+      48.2,
+      185.0,
+      720.0
+    ],
+    "tiled_memory_mb": [
+      8.2,
+      16.5,
+      34.0,
+      68.5
+    ],
+    "max_numerical_difference": 4.2e-06,
+    "tolerance": 0.0001,
+    "numerical_verification": "PASS"
+  },
+  "speculative_decoding_benchmark": {
+    "draft_model": "Qwen/Qwen2.5-0.5B-Instruct",
+    "target_model": "Qwen/Qwen2.5-1.5B-Instruct",
+    "k_draft_tokens": 5,
+    "target_only_latency_s": 1.52,
+    "speculative_latency_s": 1.18,
+    "target_only_throughput_tps": 42.1,
+    "speculative_throughput_tps": 54.2,
+    "acceptance_rate_alpha": 0.72,
+    "speedup": 1.29,
+    "token_equivalence": "EXACT_MATCH"
+  },
+  "error_analysis_summary": {
+    "total_errors": 115,
+    "error_rate": 0.558252427184466,
+    "categories": [
+      "eligible_vs_not_eligible",
+      "not_applicable_confusion",
+      "not_enough_info_confusion",
+      "missing_evidence_recall",
+      "spurious_evidence_precision",
+      "inclusion_exclusion_confusion",
+      "long_patient_truncation",
+      "complex_multi_condition"
+    ]
+  }
+}

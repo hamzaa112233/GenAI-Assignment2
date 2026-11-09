@@ -23,16 +23,81 @@ matplotlib.use("Agg")  # non-interactive backend for Colab / headless
 
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
-from sklearn.metrics import (
-    accuracy_score,
-    classification_report,
-    confusion_matrix,
-    f1_score,
-    precision_recall_fscore_support,
-    precision_score,
-    recall_score,
-)
+
+try:
+    import seaborn as sns
+    HAS_SEABORN = True
+except ImportError:
+    HAS_SEABORN = False
+try:
+    from sklearn.metrics import (
+        accuracy_score,
+        classification_report,
+        confusion_matrix,
+        f1_score,
+        precision_recall_fscore_support,
+        precision_score,
+        recall_score,
+    )
+    HAS_SKLEARN = True
+except (ImportError, OSError):
+    HAS_SKLEARN = False
+
+    def accuracy_score(y_true, y_pred):
+        return sum(1 for yt, yp in zip(y_true, y_pred) if yt == yp) / max(len(y_true), 1)
+
+    def confusion_matrix(y_true, y_pred, labels=None):
+        if labels is None:
+            labels = sorted(list(set(y_true) | set(y_pred)))
+        label_to_idx = {l: i for i, l in enumerate(labels)}
+        n = len(labels)
+        cm = np.zeros((n, n), dtype=int)
+        for yt, yp in zip(y_true, y_pred):
+            if yt in label_to_idx and yp in label_to_idx:
+                cm[label_to_idx[yt], label_to_idx[yp]] += 1
+        return cm
+
+    def precision_recall_fscore_support(y_true, y_pred, labels=None, average=None, zero_division=0):
+        if labels is None:
+            labels = sorted(list(set(y_true) | set(y_pred)))
+        cm = confusion_matrix(y_true, y_pred, labels=labels)
+        n = len(labels)
+        precisions, recalls, f1s, supports = [], [], [], []
+        for i in range(n):
+            tp = cm[i, i]
+            fp = cm[:, i].sum() - tp
+            fn = cm[i, :].sum() - tp
+            supp = cm[i, :].sum()
+            prec = tp / (tp + fp) if (tp + fp) > 0 else zero_division
+            rec = tp / (tp + fn) if (tp + fn) > 0 else zero_division
+            f1 = (2 * prec * rec) / (prec + rec) if (prec + rec) > 0 else zero_division
+            precisions.append(prec)
+            recalls.append(rec)
+            f1s.append(f1)
+            supports.append(supp)
+        if average == "macro":
+            return float(np.mean(precisions)), float(np.mean(recalls)), float(np.mean(f1s)), None
+        if average == "weighted":
+            total = sum(supports)
+            wf1 = sum(f * s for f, s in zip(f1s, supports)) / total if total > 0 else zero_division
+            return None, None, float(wf1), None
+        return np.array(precisions), np.array(recalls), np.array(f1s), np.array(supports)
+
+    def f1_score(y_true, y_pred, labels=None, average="macro", zero_division=0):
+        _, _, f1, _ = precision_recall_fscore_support(y_true, y_pred, labels=labels, average=average, zero_division=zero_division)
+        return f1
+
+    def classification_report(y_true, y_pred, labels=None, target_names=None, zero_division=0):
+        names = target_names or labels
+        p, r, f, s = precision_recall_fscore_support(y_true, y_pred, labels=labels, average=None, zero_division=zero_division)
+        lines = [f"{'class':<20} {'precision':>10} {'recall':>10} {'f1-score':>10} {'support':>10}"]
+        for name, pi, ri, fi, si in zip(names, p, r, f, s):
+            lines.append(f"{name:<20} {pi:>10.2f} {ri:>10.2f} {fi:>10.2f} {int(si):>10}")
+        acc = accuracy_score(y_true, y_pred)
+        lines.append(f"{'accuracy':<20} {'':>10} {'':>10} {acc:>10.2f} {len(y_true):>10}")
+        mp, mr, mf, _ = precision_recall_fscore_support(y_true, y_pred, labels=labels, average='macro', zero_division=zero_division)
+        lines.append(f"{'macro avg':<20} {mp:>10.2f} {mr:>10.2f} {mf:>10.2f} {len(y_true):>10}")
+        return '\n'.join(lines)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -160,20 +225,38 @@ def _plot_confusion_matrix(
     title: str,
     save_path: Path,
 ) -> None:
-    """Plot and save a single confusion matrix as a seaborn heatmap."""
+    """Plot and save a single confusion matrix."""
     fig, ax = plt.subplots(figsize=(7, 6))
-    sns.heatmap(
-        cm,
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        xticklabels=label_names,
-        yticklabels=label_names,
-        ax=ax,
-        linewidths=0.5,
-        linecolor="grey",
-        cbar_kws={"shrink": 0.8},
-    )
+    if HAS_SEABORN:
+        sns.heatmap(
+            cm,
+            annot=True,
+            fmt="d",
+            cmap="Blues",
+            xticklabels=label_names,
+            yticklabels=label_names,
+            ax=ax,
+            linewidths=0.5,
+            linecolor="grey",
+            cbar_kws={"shrink": 0.8},
+        )
+    else:
+        im = ax.imshow(cm, interpolation="nearest", cmap=plt.cm.Blues)
+        fig.colorbar(im, ax=ax, shrink=0.8)
+        tick_marks = np.arange(len(label_names))
+        ax.set_xticks(tick_marks)
+        ax.set_yticks(tick_marks)
+        ax.set_xticklabels(label_names)
+        ax.set_yticklabels(label_names)
+        thresh = cm.max() / 2.0 if cm.max() > 0 else 1.0
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                ax.text(
+                    j, i, format(int(cm[i, j]), "d"),
+                    ha="center", va="center",
+                    color="white" if cm[i, j] > thresh else "black",
+                    fontweight="bold"
+                )
     ax.set_xlabel("Predicted Label", fontsize=12)
     ax.set_ylabel("True Label", fontsize=12)
     ax.set_title(title, fontsize=14, fontweight="bold")

@@ -1,0 +1,174 @@
+================================================================================
+ERROR ANALYSIS REPORT – Clinical Trial Eligibility
+================================================================================
+Total samples analysed : 206
+Total errors           : 115
+Error rate             : 0.5583
+
+--- Label confusion counts (true -> pred) ---
+  not_enough_info -> not_applicable: 16
+  not_eligible -> not_enough_info: 14
+  not_eligible -> eligible: 12
+  not_eligible -> not_applicable: 9
+  eligible -> not_enough_info: 7
+  not_enough_info -> eligible: 7
+  not_applicable -> not_enough_info: 6
+  not_applicable -> eligible: 3
+  eligible -> not_eligible: 2
+  eligible -> not_applicable: 1
+
+--------------------------------------------------------------------------------
+Category: eligible_vs_not_eligible
+  Description : Model confused 'eligible' with 'not_eligible' or vice-versa.  This is the most clinically dangerous error because it directly affects whether a patient would be enrolled.
+  Examples found: 5
+    Example 1:
+      True: not_eligible  Pred: eligible
+      Criterion: Can not use heparin.
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 2:
+      True: not_eligible  Pred: eligible
+      Criterion: With or will take arteriovenous fistula surgery in right arm.
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 3:
+      True: eligible  Pred: not_eligible
+      Criterion: Heart rate of at least 90/min;
+      Patient: 0. A 40-year-old woman with no past medical history presents to the ER with excruciating pain in her right arm that had 
+  Suggested fixes:
+    - Add contrastive training examples that differ only in the negation of a criterion.
+    - Incorporate attention supervision to force focus on negation cues.
+    - Use chain-of-thought prompting to explicitly reason about eligibility.
+
+--------------------------------------------------------------------------------
+Category: not_applicable_confusion
+  Description : Model either missed a 'not_applicable' label or wrongly predicted it.  This indicates the model struggles to recognise when a criterion simply does not apply to a patient.
+  Examples found: 5
+    Example 1:
+      True: not_applicable  Pred: eligible
+      Criterion: Pregnancy
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 2:
+      True: not_enough_info  Pred: not_applicable
+      Criterion: Patients with an estimated pre-operative glomerular filtration rate < 30mls/min/1.73m2
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 3:
+      True: not_eligible  Pred: not_applicable
+      Criterion: Patients with a known history of myocarditis, pericarditis or amyloidosis
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+  Suggested fixes:
+    - Add explicit training examples where the criterion topic is absent from the patient note.
+    - Use keyword-overlap features as auxiliary signals.
+    - Prompt the model to first determine topic relevance before eligibility.
+
+--------------------------------------------------------------------------------
+Category: not_enough_info_confusion
+  Description : Model either missed a 'not_enough_info' label or wrongly predicted it.  This error occurs when the model hallucinates information that is not present in the patient description.
+  Examples found: 5
+    Example 1:
+      True: eligible  Pred: not_enough_info
+      Criterion: Age greater than 18 years
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 2:
+      True: eligible  Pred: not_enough_info
+      Criterion: Patient willing to give full informed consent for participation
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 3:
+      True: not_eligible  Pred: not_enough_info
+      Criterion: Patients undergoing open abdominal aortic aneurysm repair
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+  Suggested fixes:
+    - Train with explicit 'information gap' annotations.
+    - Add a verification step asking 'Is this information present in the note?'.
+    - Increase dropout to reduce over-confident predictions on sparse evidence.
+
+--------------------------------------------------------------------------------
+Category: missing_evidence_recall
+  Description : Model failed to retrieve one or more gold evidence sentences.  Indicates insufficient sensitivity to supporting text.
+  Examples found: 5
+    Example 1:
+      True: eligible  Pred: not_enough_info
+      Criterion: Patient willing to give full informed consent for participation
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 2:
+      True: eligible  Pred: eligible
+      Criterion: Signed informed consent.
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 3:
+      True: not_eligible  Pred: not_eligible
+      Criterion: Had been performed central venous puncture or catheterization before.
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+  Suggested fixes:
+    - Lower the evidence selection threshold during inference.
+    - Use BM25 as a recall-boosting pre-filter before neural re-ranking.
+    - Train a dedicated evidence extractor with focal loss on rare positives.
+
+--------------------------------------------------------------------------------
+Category: spurious_evidence_precision
+  Description : Model retrieved evidence sentences not in the gold set.  This can mislead clinicians reviewing the system output.
+  Examples found: 5
+    Example 1:
+      True: eligible  Pred: not_enough_info
+      Criterion: Patient willing to give full informed consent for participation
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 2:
+      True: not_eligible  Pred: not_eligible
+      Criterion: Patients undergoing elective carotid endarterectomy
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 3:
+      True: not_eligible  Pred: not_enough_info
+      Criterion: Patients undergoing open abdominal aortic aneurysm repair
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+  Suggested fixes:
+    - Raise the evidence selection threshold.
+    - Add a post-hoc entailment verifier to filter irrelevant sentences.
+    - Use contrastive evidence training with hard-negative sentences.
+
+--------------------------------------------------------------------------------
+Category: inclusion_exclusion_confusion
+  Description : Model shows systematically different error patterns on inclusion vs. exclusion criteria.  E.g., tends to predict 'eligible' for exclusion criteria that should be 'not_eligible'.
+  Examples found: 5
+    Example 1:
+      True: not_applicable  Pred: eligible
+      Criterion: Pregnancy
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 2:
+      True: not_enough_info  Pred: eligible
+      Criterion: Patients with previous axillary surgery
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 3:
+      True: not_eligible  Pred: eligible
+      Criterion: Can not use heparin.
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+  Suggested fixes:
+    - Prepend the criterion type (inclusion / exclusion) as a special token.
+    - Use separate classification heads or adapters for inclusion vs. exclusion.
+    - Add explicit reasoning instructions about polarity reversal for exclusion criteria.
+
+--------------------------------------------------------------------------------
+Category: long_patient_truncation
+  Description : Errors on samples whose patient description exceeds the model's effective context window, suggesting information loss from truncation.
+  Examples found: 0
+  Suggested fixes:
+    - Increase max_length or switch to a model with longer context.
+    - Summarise the patient description before feeding to the model.
+    - Use retrieval-augmented generation to select only relevant note sections.
+
+--------------------------------------------------------------------------------
+Category: complex_multi_condition
+  Description : Errors on criteria containing multiple logical conditions (AND / OR / ranges / nested clauses).  The model fails to evaluate all conditions correctly.
+  Examples found: 5
+    Example 1:
+      True: not_eligible  Pred: not_enough_info
+      Criterion: Patients on glibenclamide or nicorandil (these medications may interfere with RIPC)
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 2:
+      True: not_enough_info  Pred: not_applicable
+      Criterion: Patients with an estimated pre-operative glomerular filtration rate < 30mls/min/1.73m2
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+    Example 3:
+      True: not_eligible  Pred: not_applicable
+      Criterion: Patients with a known history of myocarditis, pericarditis or amyloidosis
+      Patient: 0. A physician is called to see a 67-year-old woman who underwent cardiac catheterization via the right femoral artery e
+  Suggested fixes:
+    - Decompose multi-condition criteria into atomic sub-criteria.
+    - Train with chain-of-thought annotations that reason over each sub-condition.
+    - Use a rule-based post-processor for numeric range checks.

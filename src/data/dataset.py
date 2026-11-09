@@ -14,7 +14,53 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from datasets import Dataset, DatasetDict, load_dataset
+
+try:
+    from datasets import Dataset, DatasetDict, load_dataset
+    HAS_DATASETS = True
+except ImportError:
+    HAS_DATASETS = False
+
+    class Dataset(list):
+        """Lightweight fallback Dataset when huggingface datasets is not installed."""
+        def __init__(self, data=None):
+            super().__init__(data or [])
+
+        @property
+        def column_names(self):
+            return list(self[0].keys()) if len(self) > 0 else []
+
+        def __getitem__(self, key):
+            if isinstance(key, str):
+                return [row[key] for row in self]
+            if isinstance(key, slice):
+                return Dataset(super().__getitem__(key))
+            return super().__getitem__(key)
+
+        def select(self, indices):
+            return Dataset([self[i] for i in indices])
+
+        def remove_columns(self, cols):
+            col_set = set(cols)
+            return Dataset([{k: v for k, v in row.items() if k not in col_set} for row in self])
+
+        def map(self, fn, desc=None):
+            mapped = []
+            for item in self:
+                res = fn(item)
+                new_item = dict(item)
+                if isinstance(res, dict):
+                    new_item.update(res)
+                mapped.append(new_item)
+            return Dataset(mapped)
+
+        @classmethod
+        def from_list(cls, rows):
+            return cls(rows)
+
+    class DatasetDict(dict):
+        """Lightweight fallback DatasetDict."""
+        pass
 
 from src.data.preprocessing import format_input_prompt, format_target_output
 
@@ -55,15 +101,27 @@ def load_raw_dataset() -> Dataset:
     """Download and return the raw TrialGPT-Criterion-Annotations dataset.
 
     The dataset is hosted on Hugging Face under the ``ncbi`` organization.
-    It has a single ``train`` split containing all 1,020 annotations.
+    It has a single ``train`` split containing all annotations. Checks for
+    cached local JSON first.
 
     Returns
     -------
     Dataset
-        The full raw HuggingFace dataset (single split).
+        The full raw dataset.
     """
-    ds = load_dataset("ncbi/TrialGPT-Criterion-Annotations", split="train")
-    return ds
+    local_path = Path("data/trialgpt_criterion_annotations.json")
+    if local_path.exists():
+        with open(local_path, "r", encoding="utf-8") as f:
+            rows = json.load(f)
+        if HAS_DATASETS:
+            return Dataset.from_list(rows)
+        return Dataset(rows)
+
+    if HAS_DATASETS:
+        ds = load_dataset("ncbi/TrialGPT-Criterion-Annotations", split="train")
+        return ds
+
+    raise FileNotFoundError("Local data not found and 'datasets' library is not installed.")
 
 
 def get_patient_ids(ds: Dataset) -> List[str]:
@@ -313,32 +371,32 @@ def prepare_datasets(
         - The patient split mapping.
     """
     print("=" * 60)
-    print("Clinical Trial Eligibility — Data Preparation Pipeline")
+    print("Clinical Trial Eligibility - Data Preparation Pipeline")
     print("=" * 60)
 
     # Step 1: Download
     print("\n[1/6] Downloading TrialGPT-Criterion-Annotations...")
     raw_ds = load_raw_dataset()
-    print(f"  → Loaded {len(raw_ds)} annotations")
-    print(f"  → Columns: {raw_ds.column_names}")
+    print(f"  -> Loaded {len(raw_ds)} annotations")
+    print(f"  -> Columns: {raw_ds.column_names}")
 
     # Step 2: Patient IDs
     print("\n[2/6] Extracting patient IDs...")
     patient_ids = get_patient_ids(raw_ds)
-    print(f"  → Found {len(patient_ids)} unique patients")
+    print(f"  -> Found {len(patient_ids)} unique patients")
 
     # Step 3: Split
     print("\n[3/6] Creating patient-grouped splits...")
     patient_splits = create_patient_splits(patient_ids)
     for split_name, pids in patient_splits.items():
-        print(f"  → {split_name}: {len(pids)} patients")
+        print(f"  -> {split_name}: {len(pids)} patients")
 
     # Step 4: Split dataset
     print("\n[4/6] Splitting dataset and removing leakage columns...")
     ds_dict = split_dataset_by_patients(raw_ds, patient_splits)
     ds_dict = remove_leakage_columns(ds_dict)
     for split_name, ds in ds_dict.items():
-        print(f"  → {split_name}: {len(ds)} samples, columns: {ds.column_names}")
+        print(f"  -> {split_name}: {len(ds)} samples, columns: {ds.column_names}")
 
     # Verify no patient overlap
     train_pids = set(ds_dict["train"]["patient_id"])
@@ -347,7 +405,7 @@ def prepare_datasets(
     assert train_pids.isdisjoint(val_pids), "Train/val patient overlap detected!"
     assert train_pids.isdisjoint(test_pids), "Train/test patient overlap detected!"
     assert val_pids.isdisjoint(test_pids), "Val/test patient overlap detected!"
-    print("  ✓ No patient overlap between splits")
+    print("  [OK] No patient overlap between splits")
 
     # Verify leakage columns removed
     for split_name, ds in ds_dict.items():
@@ -355,7 +413,7 @@ def prepare_datasets(
             assert col not in ds.column_names, (
                 f"Leakage column '{col}' still present in {split_name}!"
             )
-    print("  ✓ All GPT-4 leakage columns removed")
+    print("  [OK] All GPT-4 leakage columns removed")
 
     # Step 5: Format
     print("\n[5/6] Formatting prompts...")
@@ -364,7 +422,7 @@ def prepare_datasets(
     # Step 6: Save manifest
     print("\n[6/6] Saving split manifest...")
     manifest_path = save_split_manifest(patient_splits, ds_dict, output_dir)
-    print(f"  → Manifest saved to: {manifest_path}")
+    print(f"  -> Manifest saved to: {manifest_path}")
 
     # Summary
     print("\n" + "=" * 60)
@@ -386,9 +444,9 @@ if __name__ == "__main__":
 
     # Print a sample from each split
     for split_name in ["train", "validation", "test"]:
-        print(f"\n{'─' * 40}")
+        print("\n" + "-" * 40)
         print(f"Sample from {split_name}:")
-        print(f"{'─' * 40}")
+        print("-" * 40)
         sample = ds_dict[split_name][0]
         print(f"Patient ID: {sample['patient_id']}")
         print(f"Trial ID:   {sample['trial_id']}")
