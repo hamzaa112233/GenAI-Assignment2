@@ -26,6 +26,22 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
+def normalize_label(label: Any) -> str:
+    """Normalize raw label variants to canonical 4 classes."""
+    if not label:
+        return "not_enough_info"
+    l = str(label).lower().strip().replace("-", "_").replace(" ", "_")
+    if l in ("included", "not_excluded", "eligible"):
+        return "eligible"
+    if l in ("not_included", "excluded", "not_eligible"):
+        return "not_eligible"
+    if "applicable" in l:
+        return "not_applicable"
+    if "info" in l or "enough" in l or l in ("unknown", "none"):
+        return "not_enough_info"
+    return l
+
+
 # ---------------------------------------------------------------------------
 # Inference helpers
 # ---------------------------------------------------------------------------
