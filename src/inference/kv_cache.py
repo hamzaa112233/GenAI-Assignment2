@@ -331,6 +331,8 @@ class KVCachedGenerator:
 # Verification
 # ============================================================================
 def verify_equivalence(
+    model: Optional[AutoModelForCausalLM] = None,
+    tokenizer: Optional[AutoTokenizer] = None,
     model_name: str = DEFAULT_MODEL_NAME,
     prompts: Optional[List[str]] = None,
     max_new_tokens: int = MAX_NEW_TOKENS,
@@ -338,34 +340,21 @@ def verify_equivalence(
     """
     Run both cached and uncached generators on multiple prompts of different
     lengths and assert that they produce *identical* token sequences.
-
-    Parameters
-    ----------
-    model_name : str
-        HuggingFace model identifier.
-    prompts : list[str], optional
-        Override the default sample prompts.
-    max_new_tokens : int
-        How many tokens to generate per prompt.
-
-    Returns
-    -------
-    bool
-        True if all prompts produce token-level identical outputs.
     """
     if prompts is None:
         prompts = SAMPLE_PROMPTS
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[verify_equivalence] Loading model '{model_name}' on {device} ...")
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-        device_map=device,
-        trust_remote_code=True,
-    )
-    model.eval()
+    if model is None or tokenizer is None:
+        print(f"[verify_equivalence] Loading model '{model_name}' on {device} ...")
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device_map=device,
+            trust_remote_code=True,
+        )
+        model.eval()
 
     uncached_gen = UncachedGenerator(model, tokenizer, max_new_tokens=max_new_tokens)
     cached_gen = KVCachedGenerator(model, tokenizer, max_new_tokens=max_new_tokens)
@@ -412,6 +401,8 @@ def verify_equivalence(
 # Benchmark
 # ============================================================================
 def benchmark(
+    model: Optional[AutoModelForCausalLM] = None,
+    tokenizer: Optional[AutoTokenizer] = None,
     model_name: str = DEFAULT_MODEL_NAME,
     max_new_tokens: int = MAX_NEW_TOKENS,
     warmup_iters: int = WARMUP_ITERS,
@@ -420,38 +411,18 @@ def benchmark(
 ) -> Dict[str, Any]:
     """
     Benchmark uncached vs. KV-cached generation.
-
-    Measures prefill time, decode time, tokens/sec, and peak GPU memory.
-    Uses warmup iterations and ``torch.cuda.synchronize()`` for accuracy.
-
-    Parameters
-    ----------
-    model_name : str
-        HuggingFace model identifier.
-    max_new_tokens : int
-        Number of tokens to generate per run.
-    warmup_iters : int
-        Warmup iterations (discarded).
-    bench_iters : int
-        Timed iterations to average.
-    save_figure : bool
-        If True, save comparison chart to ``reports/figures/kv_cache_benchmark.png``.
-
-    Returns
-    -------
-    dict
-        Benchmark results for both generators.
     """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"[benchmark] Loading model '{model_name}' on {device} ...")
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-        device_map=device,
-        trust_remote_code=True,
-    )
-    model.eval()
+    if model is None or tokenizer is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"[benchmark] Loading model '{model_name}' on {device} ...")
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+            device_map=device,
+            trust_remote_code=True,
+        )
+        model.eval()
 
     prompt = SAMPLE_PROMPTS[0]
     uncached_gen = UncachedGenerator(model, tokenizer, max_new_tokens=max_new_tokens)

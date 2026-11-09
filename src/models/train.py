@@ -134,26 +134,30 @@ def format_assistant_message(
 def build_chat_messages(example: Dict[str, Any]) -> List[Dict[str, str]]:
     """Convert a raw dataset example into Qwen2.5 chat-format messages.
 
-    Expected keys in *example*:
-        - ``patient_description`` (str): numbered patient sentences
-        - ``criterion_type`` (str): "inclusion" or "exclusion"
-        - ``criterion`` (str): the criterion text
-        - ``label`` (str): eligibility label
-        - ``evidence_sentence_ids`` (list[int]): supporting sentence IDs
-        - ``rationale`` (str): explanation
+    Supports both TrialGPT native columns (note, criterion_text, expert_eligibility, expert_sentences)
+    and canonical alias keys.
 
     Returns:
         List of message dicts with roles ``system``, ``user``, ``assistant``.
     """
+    patient_desc = example.get("patient_description", example.get("note", ""))
+    crit_type = example.get("criterion_type", "inclusion")
+    crit_text = example.get("criterion", example.get("criterion_text", ""))
+    label = example.get("label", example.get("expert_eligibility", "not_enough_info"))
+    ev_ids = example.get("evidence_sentence_ids", example.get("expert_sentences", []))
+    if isinstance(ev_ids, str):
+        import re
+        ev_ids = [int(x) for x in re.findall(r"\d+", ev_ids)]
+
     user_content = format_user_message(
-        patient_description=example["patient_description"],
-        criterion_type=example["criterion_type"],
-        criterion_text=example["criterion"],
+        patient_description=patient_desc,
+        criterion_type=crit_type,
+        criterion_text=crit_text,
     )
     assistant_content = format_assistant_message(
-        eligibility=example["label"],
-        evidence_sentence_ids=example.get("evidence_sentence_ids", []),
-        rationale=example.get("rationale", ""),
+        eligibility=label,
+        evidence_sentence_ids=ev_ids,
+        rationale=example.get("rationale", f"Criterion assessment based on evidence sentences {ev_ids}."),
     )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -476,12 +480,17 @@ def run_inference_comparison(
     print(f"{'='*80}")
 
     for i, example in enumerate(val_examples):
+        patient_desc = example.get("patient_description", example.get("note", ""))
+        crit_type = example.get("criterion_type", "inclusion")
+        crit_text = example.get("criterion", example.get("criterion_text", ""))
+        label = example.get("label", example.get("expert_eligibility", "not_enough_info"))
+
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": format_user_message(
-                example["patient_description"],
-                example["criterion_type"],
-                example["criterion"],
+                patient_desc,
+                crit_type,
+                crit_text,
             )},
         ]
         prompt = tokenizer.apply_chat_template(
@@ -513,8 +522,8 @@ def run_inference_comparison(
         results.append(generated_text)
 
         print(f"\n--- Sample {i+1} [{tag}] ---")
-        print(f"Criterion ({example['criterion_type']}): {example['criterion'][:100]}...")
-        print(f"Ground truth: {example['label']}")
+        print(f"Criterion ({crit_type}): {crit_text[:100]}...")
+        print(f"Ground truth: {label}")
         print(f"Generated:\n{generated_text[:500]}")
 
     print(f"\n{'='*80}\n")

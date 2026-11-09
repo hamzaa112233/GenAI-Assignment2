@@ -435,6 +435,12 @@ def prepare_datasets(
     return ds_dict, patient_splits
 
 
+def load_dataset():
+    """Load and return the patient-grouped split DatasetDict."""
+    ds_dict, _ = prepare_datasets()
+    return ds_dict
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
