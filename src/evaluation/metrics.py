@@ -110,6 +110,23 @@ LABEL_NAMES: List[str] = [
     "not_enough_info",
 ]
 
+
+def normalize_label(label: Any) -> str:
+    """Normalize raw label variants to canonical 4 classes."""
+    if not label:
+        return "not_enough_info"
+    l = str(label).lower().strip().replace("-", "_").replace(" ", "_")
+    if l in ("included", "not_excluded", "eligible"):
+        return "eligible"
+    if l in ("not_included", "excluded", "not_eligible"):
+        return "not_eligible"
+    if "applicable" in l:
+        return "not_applicable"
+    if "info" in l or "enough" in l or l in ("unknown", "none"):
+        return "not_enough_info"
+    return l
+
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = PROJECT_ROOT / "reports"
 FIGURES_DIR = REPORTS_DIR / "figures"
@@ -160,6 +177,10 @@ def compute_classification_metrics(
     """
     if label_names is None:
         label_names = LABEL_NAMES
+
+    # Normalize inputs to canonical 4 classes
+    y_true = [normalize_label(y) for y in y_true]
+    y_pred = [normalize_label(y) for y in y_pred]
 
     # Validate inputs
     if len(y_true) == 0 or len(y_pred) == 0:
@@ -309,6 +330,10 @@ def compute_confusion_matrices(
         save_dir = FIGURES_DIR
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
+
+    # Normalize inputs to canonical 4 classes
+    y_true = [normalize_label(y) for y in y_true]
+    y_pred = [normalize_label(y) for y in y_pred]
 
     # Overall
     cm_overall = confusion_matrix(y_true, y_pred, labels=label_names)
@@ -630,8 +655,8 @@ def error_analysis(
     label_error_counter: Counter = Counter()
 
     for idx, s in enumerate(samples):
-        true_label = s.get("true_label", "")
-        pred_label = s.get("pred_label", "")
+        true_label = normalize_label(s.get("true_label", ""))
+        pred_label = normalize_label(s.get("pred_label", ""))
         gold_ev = set(s.get("gold_evidence", []))
         pred_ev = set(s.get("pred_evidence", []))
         crit_type = s.get("criteria_type", "unknown")

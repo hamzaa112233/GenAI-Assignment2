@@ -96,9 +96,10 @@ def parse_prediction(text: str) -> Dict[str, Any]:
     """Parse a model output into eligibility + evidence."""
     import json as _json
     import re
+    from src.evaluation.metrics import normalize_label
 
     result = {
-        "eligibility": "unknown",
+        "eligibility": "not_enough_info",
         "evidence_sentence_ids": [],
         "rationale": "",
         "parse_success": False,
@@ -110,7 +111,8 @@ def parse_prediction(text: str) -> Dict[str, Any]:
     try:
         parsed = _json.loads(text.strip())
         if isinstance(parsed, dict):
-            result["eligibility"] = parsed.get("eligibility", "unknown").strip().lower()
+            raw_elig = parsed.get("eligibility", "not_enough_info")
+            result["eligibility"] = normalize_label(raw_elig)
             result["evidence_sentence_ids"] = [
                 int(x) for x in parsed.get("evidence_sentence_ids",
                                              parsed.get("supporting_sentences", []))
@@ -126,7 +128,8 @@ def parse_prediction(text: str) -> Dict[str, Any]:
     if m:
         try:
             parsed = _json.loads(m.group())
-            result["eligibility"] = parsed.get("eligibility", "unknown").strip().lower()
+            raw_elig = parsed.get("eligibility", "not_enough_info")
+            result["eligibility"] = normalize_label(raw_elig)
             result["evidence_sentence_ids"] = [
                 int(x) for x in parsed.get("evidence_sentence_ids",
                                              parsed.get("supporting_sentences", []))
@@ -139,10 +142,14 @@ def parse_prediction(text: str) -> Dict[str, Any]:
 
     # Fallback: look for label keywords
     lower = text.lower()
-    for label in ["not_enough_info", "not_applicable", "not_eligible", "eligible",
-                   "not enough info", "not applicable", "not eligible"]:
-        if label in lower:
-            result["eligibility"] = label.replace(" ", "_")
+    for kw in [
+        "not_enough_info", "not enough information", "not enough info",
+        "not_applicable", "not applicable",
+        "not_eligible", "not eligible", "not included", "not_included",
+        "not excluded", "not_excluded", "eligible", "included", "excluded"
+    ]:
+        if kw in lower:
+            result["eligibility"] = normalize_label(kw)
             result["parse_success"] = True
             break
 
@@ -228,7 +235,7 @@ def run_full_evaluation(
 
     for i in range(len(test_dataset)):
         ex = test_dataset[i]
-        true_labels.append(ex.get(label_col, "unknown"))
+        true_labels.append(normalize_label(ex.get(label_col, "not_enough_info")))
         ev = ex.get(evidence_col, "[]")
         if isinstance(ev, str):
             import re
