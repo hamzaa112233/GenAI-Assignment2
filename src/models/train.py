@@ -559,11 +559,17 @@ def load_config(config_path: str) -> Dict[str, Any]:
 # Main training function
 # ---------------------------------------------------------------------------
 
-def main(config_path: str = "configs/training_config.yaml") -> None:
+def main(
+    config_path: str = "configs/training_config.yaml",
+    model=None,
+    tokenizer=None,
+) -> Dict[str, Any]:
     """End-to-end training pipeline.
 
     Args:
         config_path: Path to the YAML training configuration.
+        model: Optional pre-loaded model.
+        tokenizer: Optional pre-loaded tokenizer.
     """
     # ------------------------------------------------------------------
     # 1. Load configuration
@@ -610,13 +616,14 @@ def main(config_path: str = "configs/training_config.yaml") -> None:
     # ------------------------------------------------------------------
     # 2. Load model + tokenizer
     # ------------------------------------------------------------------
-    logger.info("Loading model and tokenizer...")
-    model, tokenizer = load_model_for_training(
-        model_name=model_name,
-        lora_r=lora_r,
-        lora_alpha=lora_alpha,
-        lora_dropout=lora_dropout,
-    )
+    if model is None or tokenizer is None:
+        logger.info("Loading model and tokenizer...")
+        model, tokenizer = load_model_for_training(
+            model_name=model_name,
+            lora_r=lora_r,
+            lora_alpha=lora_alpha,
+            lora_dropout=lora_dropout,
+        )
 
     # ------------------------------------------------------------------
     # 3. Prepare dataset
@@ -652,35 +659,56 @@ def main(config_path: str = "configs/training_config.yaml") -> None:
     # ------------------------------------------------------------------
     # 6. Training arguments
     # ------------------------------------------------------------------
-    training_args = TrainingArguments(
-        output_dir=output_dir,
-        num_train_epochs=num_epochs,
-        per_device_train_batch_size=batch_size,
-        per_device_eval_batch_size=batch_size,
-        gradient_accumulation_steps=grad_accum,
-        learning_rate=lr,
-        weight_decay=weight_decay,
-        warmup_ratio=warmup_ratio,
-        lr_scheduler_type="cosine",
-        logging_steps=logging_steps,
-        logging_first_step=True,
-        eval_strategy="epoch",
-        save_strategy="epoch",
-        save_total_limit=2,
-        load_best_model_at_end=True,
-        metric_for_best_model="eval_loss",
-        greater_is_better=False,
-        bf16=True,
-        tf32=True,
-        gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={"use_reentrant": False},
-        optim="paged_adamw_8bit",
-        report_to="none",
-        seed=seed,
-        dataloader_pin_memory=True,
-        remove_unused_columns=False,
-        label_names=["labels"],
+    import inspect
+    sig = inspect.signature(TrainingArguments.__init__).parameters
+    eval_strategy_key = "eval_strategy" if "eval_strategy" in sig else "evaluation_strategy"
+
+    use_bf16 = (
+        torch.cuda.is_available()
+        and hasattr(torch.cuda, "is_bf16_supported")
+        and torch.cuda.is_bf16_supported()
     )
+    use_fp16 = torch.cuda.is_available() and not use_bf16
+
+    args_dict = {
+        "output_dir": output_dir,
+        "num_train_epochs": num_epochs,
+        "per_device_train_batch_size": batch_size,
+        "per_device_eval_batch_size": batch_size,
+        "gradient_accumulation_steps": grad_accum,
+        "learning_rate": lr,
+        "weight_decay": weight_decay,
+        "warmup_ratio": warmup_ratio,
+        "lr_scheduler_type": "cosine",
+        "logging_steps": logging_steps,
+        "logging_first_step": True,
+        eval_strategy_key: "epoch",
+        "save_strategy": "epoch",
+        "save_total_limit": 2,
+        "load_best_model_at_end": True,
+        "metric_for_best_model": "eval_loss",
+        "greater_is_better": False,
+        "bf16": use_bf16,
+        "fp16": use_fp16,
+        "gradient_checkpointing": True,
+        "optim": "paged_adamw_8bit" if torch.cuda.is_available() else "adamw_torch",
+        "report_to": "none",
+        "seed": seed,
+        "dataloader_pin_memory": torch.cuda.is_available(),
+        "remove_unused_columns": False,
+        "label_names": ["labels"],
+    }
+    if "gradient_checkpointing_kwargs" in sig:
+        args_dict["gradient_checkpointing_kwargs"] = {"use_reentrant": False}
+    if "tf32" in sig:
+        args_dict["tf32"] = use_bf16
+
+    # Safe fallback: filter any kwargs not supported by current transformers version
+    has_var_keyword = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.values())
+    if not has_var_keyword:
+        args_dict = {k: v for k, v in args_dict.items() if k in sig}
+
+    training_args = TrainingArguments(**args_dict)
 
     # Data collator: pads input_ids, attention_mask, and labels
     data_collator = DataCollatorForSeq2Seq(
@@ -755,7 +783,8 @@ def main(config_path: str = "configs/training_config.yaml") -> None:
     print("=" * 80)
     for i, (before, after, example) in enumerate(zip(before_results, after_results, raw_val)):
         print(f"\n--- Sample {i+1} ---")
-        print(f"Ground truth label: {example['label']}")
+        ground_truth = example.get("expert_eligibility", example.get("label", "N/A"))
+        print(f"Ground truth label: {ground_truth}")
         print(f"BEFORE: {before[:300]}")
         print(f"AFTER:  {after[:300]}")
     print("\n" + "=" * 80)

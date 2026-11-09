@@ -202,8 +202,12 @@ def run_full_evaluation(
     pred_evidence = [set(p["evidence_sentence_ids"]) for p in predictions]
 
     # Extract ground truth
-    label_col = "expert_eligibility" if "expert_eligibility" in test_dataset.column_names else "label"
-    evidence_col = "expert_sentences" if "expert_sentences" in test_dataset.column_names else "evidence_sentence_ids"
+    col_names = getattr(test_dataset, "column_names", None)
+    if col_names is None and len(test_dataset) > 0:
+        col_names = list(test_dataset[0].keys())
+    col_names = col_names or []
+    label_col = "expert_eligibility" if "expert_eligibility" in col_names else "label"
+    evidence_col = "expert_sentences" if "expert_sentences" in col_names else "evidence_sentence_ids"
 
     true_labels = []
     true_evidence = []

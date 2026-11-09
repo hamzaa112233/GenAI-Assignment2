@@ -34,12 +34,19 @@ logger = logging.getLogger(__name__)
 # Quantization config
 # ---------------------------------------------------------------------------
 
+def get_compute_dtype() -> torch.dtype:
+    """Return appropriate compute dtype: bfloat16 on Ampere+, else float16."""
+    if torch.cuda.is_available() and hasattr(torch.cuda, "is_bf16_supported") and torch.cuda.is_bf16_supported():
+        return torch.bfloat16
+    return torch.float16 if torch.cuda.is_available() else torch.float32
+
+
 def get_bnb_config() -> BitsAndBytesConfig:
     """Return a 4-bit NormalFloat quantization config for QLoRA."""
     return BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_compute_dtype=get_compute_dtype(),
         bnb_4bit_use_double_quant=True,
     )
 
@@ -90,8 +97,8 @@ def load_base_model(
     kwargs = dict(
         pretrained_model_name_or_path=model_name,
         trust_remote_code=True,
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
+        device_map="auto" if torch.cuda.is_available() else None,
+        torch_dtype=get_compute_dtype(),
     )
     if quantize:
         kwargs["quantization_config"] = get_bnb_config()
